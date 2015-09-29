@@ -1,6 +1,5 @@
 int motor = D0;
 int led = D7;
-int motorTime = 3000;
 int motorVoltage = A0;
 
 struct NVDataStore {
@@ -14,13 +13,17 @@ String lastFeedingTimeStr;
 String lastResetTimeStr;
 String lastSyncTimeStr;
 String lastCheckTimeStr;
+String jamDetectedStr;
 
 #define MST -7
 
+#define MOTOR_TIME 5000
+#define JAM_DETECT_DELAY 250
+
 #define FEEDING_1_START_HOUR 8
-#define FEEDING_1_END_HOUR 12
-#define FEEDING_2_START_HOUR 16
-#define FEEDING_2_END_HOUR 22
+#define FEEDING_1_END_HOUR 10
+#define FEEDING_2_START_HOUR 19
+#define FEEDING_2_END_HOUR 21
 
 static bool isDST() {
   time_t now = Time.now();
@@ -78,23 +81,28 @@ static bool isFeedingTime() {
 }
 
 static void feedCat() {
+  int timeLeft = MOTOR_TIME;
   digitalWrite(led, HIGH);
   digitalWrite(motor, HIGH);
-  delay(100);
-  if (analogRead(motorVoltage) > 1000) {
-    // we've had a motor jam. Send a panic notice, shut off motor.
-    digitalWrite(motor, LOW);
-    digitalWrite(led, LOW);
-    Spark.publish("motor_jam",Time.timeStr(),60,PRIVATE);
-  } else {
-    delay(motorTime);
-    digitalWrite(motor, LOW);
-    digitalWrite(led, LOW);
-    time_t now = Time.now();
-    saved.lastFeeding = now;
-    EEPROM.put(0, saved);
-    Spark.publish("feeding",Time.timeStr(now),60,PRIVATE);
+
+  while (timeLeft > 0) {
+    delay(JAM_DETECT_DELAY);
+    timeLeft = timeLeft - JAM_DETECT_DELAY;
+    if (analogRead(motorVoltage) > 1000) {
+      // we've had a motor jam. Send a panic notice, shut off motor.
+      Spark.publish("motor_jam",Time.timeStr(),60,PRIVATE);
+      jamDetectedStr = Time.timeStr();
+      timeLeft = 0; // break out of loop
+    }
   }
+
+  digitalWrite(motor, LOW);
+  digitalWrite(led, LOW);
+
+  time_t now = Time.now();
+  saved.lastFeeding = now;
+  EEPROM.put(0, saved);
+  lastFeedingTimeStr = Time.timeStr(now);
 }
 
 void setup() {
@@ -123,6 +131,7 @@ void setup() {
   Spark.variable("lastSync", lastSyncTimeStr, STRING);
   Spark.variable("lastFeeding", lastFeedingTimeStr, STRING);
   Spark.variable("lastCheck", lastCheckTimeStr, STRING);
+  Spark.variable("jamDetected", jamDetectedStr, STRING);
 }
 
 void loop() {
