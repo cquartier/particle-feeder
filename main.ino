@@ -22,10 +22,15 @@ String jamDetectedStr;
 
 #define FEEDING_1_START_HOUR 8
 #define FEEDING_1_END_HOUR 10
-#define FEEDING_2_START_HOUR 19
+#define FEEDING_2_START_HOUR 18
 #define FEEDING_2_END_HOUR 21
 
-static bool isDST() {
+bool isDST();
+bool isFeedingTime();
+int cloudFeed(String command);
+int feedCat();
+
+bool isDST() {
   time_t now = Time.now();
   int month = Time.month(now);
   int day = Time.day(now);
@@ -49,7 +54,7 @@ static bool isDST() {
   return previousSunday <= 0;
 }
 
-static bool isFeedingTime() {
+bool isFeedingTime() {
   time_t now = Time.now();
   int nowHour = Time.hour(now);
   bool ret = false;
@@ -80,7 +85,12 @@ static bool isFeedingTime() {
   return ret;
 }
 
-static void feedCat() {
+int cloudFeed(String command) {
+  return feedCat();
+}
+
+int feedCat() {
+  int ret = 1;
   int timeLeft = MOTOR_TIME;
   digitalWrite(led, HIGH);
   digitalWrite(motor, HIGH);
@@ -90,9 +100,10 @@ static void feedCat() {
     timeLeft = timeLeft - JAM_DETECT_DELAY;
     if (analogRead(motorVoltage) > 1000) {
       // we've had a motor jam. Send a panic notice, shut off motor.
-      Spark.publish("motor_jam",Time.timeStr(),60,PRIVATE);
+      Particle.publish("motor_jam",Time.timeStr(),60,PRIVATE);
       jamDetectedStr = Time.timeStr();
       timeLeft = 0; // break out of loop
+      ret = -1;
     }
   }
 
@@ -103,6 +114,7 @@ static void feedCat() {
   saved.lastFeeding = now;
   EEPROM.put(0, saved);
   lastFeedingTimeStr = Time.timeStr(now);
+  return ret;
 }
 
 void setup() {
@@ -127,11 +139,13 @@ void setup() {
   pinMode(led, OUTPUT);
   pinMode(motorVoltage, INPUT);
 
-  Spark.variable("lastReset", lastResetTimeStr, STRING);
-  Spark.variable("lastSync", lastSyncTimeStr, STRING);
-  Spark.variable("lastFeeding", lastFeedingTimeStr, STRING);
-  Spark.variable("lastCheck", lastCheckTimeStr, STRING);
-  Spark.variable("jamDetected", jamDetectedStr, STRING);
+  Particle.variable("lastReset", lastResetTimeStr);
+  Particle.variable("lastSync", lastSyncTimeStr);
+  Particle.variable("lastFeeding", lastFeedingTimeStr);
+  Particle.variable("lastCheck", lastCheckTimeStr);
+  Particle.variable("jamDetected", jamDetectedStr);
+
+  Particle.function("feed", cloudFeed);
 }
 
 void loop() {
@@ -145,7 +159,12 @@ void loop() {
 
   if (Time.day() != Time.day(lastSyncTime)) {
     Serial.println("Resyncing clock");
-    Spark.syncTime();
+    Particle.syncTime();
+    if (isDST()) {
+      Time.zone(MST + 1);
+    } else {
+      Time.zone(MST);
+    }
     lastSyncTime = Time.now();
     lastSyncTimeStr = Time.timeStr(lastSyncTime);
   }
